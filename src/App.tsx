@@ -5,9 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { VscChevronRight, VscFolderOpened, VscGist } from "react-icons/vsc";
 import useLocalStorageState from "use-local-storage-state";
 
-import rustpadRaw from "../rustpad-server/src/rustpad.rs?raw";
 import Footer from "./Footer";
-import ReadCodeConfirm from "./ReadCodeConfirm";
 import Sidebar from "./Sidebar";
 import animals from "./animals.json";
 import languages from "./languages.json";
@@ -47,8 +45,6 @@ function App() {
   });
   const rustpad = useRef<Rustpad>();
   const id = useHash();
-
-  const [readCodeConfirmOpen, setReadCodeConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (editor?.getModel()) {
@@ -110,29 +106,6 @@ function App() {
     }
   }
 
-  function handleLoadSample(confirmed: boolean) {
-    if (editor?.getModel()) {
-      const model = editor.getModel()!;
-      const range = model.getFullModelRange();
-
-      // If there are at least 10 lines of code, ask for confirmation.
-      if (range.endLineNumber >= 10 && !confirmed) {
-        setReadCodeConfirmOpen(true);
-        return;
-      }
-
-      model.pushEditOperations(
-        editor.getSelections(),
-        [{ range, text: rustpadRaw }],
-        () => null,
-      );
-      editor.setPosition({ column: 0, lineNumber: 0 });
-      if (language !== "rust") {
-        handleLanguageChange("rust");
-      }
-    }
-  }
-
   function handleDarkModeChange() {
     setDarkMode(!darkMode);
   }
@@ -145,16 +118,6 @@ function App() {
       bgColor={darkMode ? "#1e1e1e" : "white"}
       color={darkMode ? "#cbcaca" : "inherit"}
     >
-      <Box
-        flexShrink={0}
-        bgColor={darkMode ? "#333333" : "#e8e8e8"}
-        color={darkMode ? "#cccccc" : "#383838"}
-        textAlign="center"
-        fontSize="sm"
-        py={0.5}
-      >
-        Rustpad
-      </Box>
       <Flex flex="1 0" minH={0}>
         <Sidebar
           documentId={id}
@@ -165,17 +128,8 @@ function App() {
           users={users}
           onDarkModeChange={handleDarkModeChange}
           onLanguageChange={handleLanguageChange}
-          onLoadSample={() => handleLoadSample(false)}
           onChangeName={(name) => name.length > 0 && setName(name)}
           onChangeColor={() => setHue(generateHue())}
-        />
-        <ReadCodeConfirm
-          isOpen={readCodeConfirmOpen}
-          onClose={() => setReadCodeConfirmOpen(false)}
-          onConfirm={() => {
-            handleLoadSample(true);
-            setReadCodeConfirmOpen(false);
-          }}
         />
 
         <Flex flex={1} minW={0} h="100%" direction="column" overflow="hidden">
