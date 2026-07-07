@@ -10,6 +10,8 @@ import { OpSeq } from "rustpad-wasm";
 export type RustpadOptions = {
   readonly uri: string;
   readonly editor: editor.IStandaloneCodeEditor;
+  /** When set, Rustpad adopts this socket instead of opening a new one. */
+  readonly socket?: WebSocket;
   readonly onConnected?: () => void;
   readonly onDisconnected?: () => void;
   readonly onDesynchronized?: () => void;
@@ -34,10 +36,11 @@ class Rustpad {
   private readonly onCursorHandle: IDisposable;
   private readonly onSelectionHandle: IDisposable;
   private readonly beforeUnload: (event: BeforeUnloadEvent) => void;
-  private readonly tryConnectId: number;
-  private readonly resetFailuresId: number;
+  private readonly tryConnectId?: number;
+  private readonly resetFailuresId?: number;
   private connectTimeoutId?: number;
   private pendingBeforeOpen?: OpSeq;
+  private ownsSocket: boolean = true;
 
   // Client-server state
   private me: number = -1;
@@ -78,19 +81,60 @@ class Rustpad {
     };
     window.addEventListener("beforeunload", this.beforeUnload);
 
-    const interval = options.reconnectInterval ?? 1000;
-    this.tryConnect();
-    this.tryConnectId = window.setInterval(() => this.tryConnect(), interval);
-    this.resetFailuresId = window.setInterval(
-      () => (this.recentFailures = 0),
-      15 * interval,
-    );
+    if (options.socket) {
+      this.ownsSocket = false;
+      this.adoptSocket(options.socket);
+    } else {
+      const interval = options.reconnectInterval ?? 1000;
+      this.tryConnect();
+      this.tryConnectId = window.setInterval(() => this.tryConnect(), interval);
+      this.resetFailuresId = window.setInterval(
+        () => (this.recentFailures = 0),
+        15 * interval,
+      );
+    }
+  }
+
+  private adoptSocket(ws: WebSocket) {
+    if (ws.readyState === WebSocket.OPEN) {
+      this.attachSocket(ws);
+      this.options.onConnected?.();
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      ws.addEventListener(
+        "open",
+        () => {
+          this.attachSocket(ws);
+          this.options.onConnected?.();
+        },
+        { once: true },
+      );
+    }
+
+    ws.addEventListener("close", () => {
+      if (this.ws === ws) {
+        this.ws = undefined;
+        this.options.onDisconnected?.();
+      }
+    });
+  }
+
+  private attachSocket(ws: WebSocket) {
+    this.ws = ws;
+    ws.onmessage = ({ data }) => {
+      if (typeof data === "string") {
+        this.handleMessage(JSON.parse(data));
+      }
+    };
   }
 
   /** Destroy this Rustpad instance and close any sockets. */
   dispose() {
-    window.clearInterval(this.tryConnectId);
-    window.clearInterval(this.resetFailuresId);
+    if (this.tryConnectId !== undefined) {
+      window.clearInterval(this.tryConnectId);
+    }
+    if (this.resetFailuresId !== undefined) {
+      window.clearInterval(this.resetFailuresId);
+    }
     if (this.connectTimeoutId !== undefined) {
       window.clearTimeout(this.connectTimeoutId);
     }
@@ -98,7 +142,11 @@ class Rustpad {
     this.onCursorHandle.dispose();
     this.onChangeHandle.dispose();
     window.removeEventListener("beforeunload", this.beforeUnload);
-    this.ws?.close();
+    if (this.ownsSocket) {
+      this.ws?.close();
+    } else if (this.ws) {
+      this.ws.onmessage = null;
+    }
   }
 
   /** Try to set the language of the editor, if connected. */

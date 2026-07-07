@@ -11,6 +11,7 @@ import type { ConnectionState } from "./ConnectionStatus";
 import animals from "./animals.json";
 import languages from "./languages.json";
 import Rustpad, { UserInfo } from "./rustpad";
+import useDocumentSocket from "./useDocumentSocket";
 import useHash from "./useHash";
 
 function getWsUri(id: string) {
@@ -44,44 +45,54 @@ function App() {
   });
   const rustpad = useRef<Rustpad>();
   const id = useHash();
+  const socket = useDocumentSocket(getWsUri(id));
 
   useEffect(() => {
     editor?.updateOptions({ readOnly: connection !== "connected" });
   }, [editor, connection]);
 
   useEffect(() => {
-    if (editor?.getModel()) {
+    if (!editor?.getModel() || !socket) return;
+
+    const model = editor.getModel()!;
+    model.setValue("");
+    model.setEOL(0); // LF
+    rustpad.current = new Rustpad({
+      uri: getWsUri(id),
+      socket,
+      editor,
+      onConnected: () => setConnection("connected"),
+      onDisconnected: () => setConnection("connecting"),
+      onDesynchronized: () => {
+        setConnection("desynchronized");
+        toast({
+          title: "Desynchronized with server",
+          description: "Please save your work and refresh the page.",
+          status: "error",
+          duration: null,
+        });
+      },
+      onChangeLanguage: (language) => {
+        if (languages.includes(language)) {
+          setLanguage(language);
+        }
+      },
+      onChangeUsers: setUsers,
+    });
+    return () => {
+      rustpad.current?.dispose();
+      rustpad.current = undefined;
+      setConnection(socket ? "connecting" : "loading");
+    };
+  }, [id, editor, socket, toast, setUsers]);
+
+  useEffect(() => {
+    if (!editor) {
+      setConnection("loading");
+    } else if (!socket) {
       setConnection("connecting");
-      const model = editor.getModel()!;
-      model.setValue("");
-      model.setEOL(0); // LF
-      rustpad.current = new Rustpad({
-        uri: getWsUri(id),
-        editor,
-        onConnected: () => setConnection("connected"),
-        onDisconnected: () => setConnection("connecting"),
-        onDesynchronized: () => {
-          setConnection("desynchronized");
-          toast({
-            title: "Desynchronized with server",
-            description: "Please save your work and refresh the page.",
-            status: "error",
-            duration: null,
-          });
-        },
-        onChangeLanguage: (language) => {
-          if (languages.includes(language)) {
-            setLanguage(language);
-          }
-        },
-        onChangeUsers: setUsers,
-      });
-      return () => {
-        rustpad.current?.dispose();
-        rustpad.current = undefined;
-      };
     }
-  }, [id, editor, toast, setUsers]);
+  }, [editor, socket]);
 
   useEffect(() => {
     if (connection === "connected") {
