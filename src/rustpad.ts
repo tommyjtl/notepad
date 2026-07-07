@@ -36,6 +36,8 @@ class Rustpad {
   private readonly beforeUnload: (event: BeforeUnloadEvent) => void;
   private readonly tryConnectId: number;
   private readonly resetFailuresId: number;
+  private connectTimeoutId?: number;
+  private pendingBeforeOpen?: OpSeq;
 
   // Client-server state
   private me: number = -1;
@@ -67,7 +69,7 @@ class Rustpad {
       cursorUpdate();
     });
     this.beforeUnload = (event: BeforeUnloadEvent) => {
-      if (this.outstanding) {
+      if (this.outstanding && this.isWsOpen()) {
         event.preventDefault();
         event.returnValue = "";
       } else {
@@ -89,6 +91,9 @@ class Rustpad {
   dispose() {
     window.clearInterval(this.tryConnectId);
     window.clearInterval(this.resetFailuresId);
+    if (this.connectTimeoutId !== undefined) {
+      window.clearTimeout(this.connectTimeoutId);
+    }
     this.onSelectionHandle.dispose();
     this.onCursorHandle.dispose();
     this.onChangeHandle.dispose();
@@ -119,11 +124,25 @@ class Rustpad {
    * error or successful end, both `this.connecting` and `this.ws` will be set
    * to falsy values.
    */
+  private isWsOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
   private tryConnect() {
     if (this.connecting || this.ws) return;
     this.connecting = true;
     const ws = new WebSocket(this.options.uri);
+    this.connectTimeoutId = window.setTimeout(() => {
+      if (this.connecting && !this.ws) {
+        ws.close();
+        this.connecting = false;
+      }
+    }, 10_000);
     ws.onopen = () => {
+      if (this.connectTimeoutId !== undefined) {
+        window.clearTimeout(this.connectTimeoutId);
+        this.connectTimeoutId = undefined;
+      }
       this.connecting = false;
       this.ws = ws;
       this.options.onConnected?.();
@@ -131,11 +150,20 @@ class Rustpad {
       this.options.onChangeUsers?.(this.users);
       this.sendInfo();
       this.sendCursorData();
+      if (this.pendingBeforeOpen) {
+        const operation = this.pendingBeforeOpen;
+        this.pendingBeforeOpen = undefined;
+        this.applyClient(operation);
+      }
       if (this.outstanding) {
         this.sendOperation(this.outstanding);
       }
     };
     ws.onclose = () => {
+      if (this.connectTimeoutId !== undefined) {
+        window.clearTimeout(this.connectTimeoutId);
+        this.connectTimeoutId = undefined;
+      }
       if (this.ws) {
         this.ws = undefined;
         this.options.onDisconnected?.();
@@ -227,6 +255,13 @@ class Rustpad {
   }
 
   private applyClient(operation: OpSeq) {
+    if (!this.isWsOpen()) {
+      this.pendingBeforeOpen = this.pendingBeforeOpen
+        ? this.pendingBeforeOpen.compose(operation)!
+        : operation;
+      this.transformCursors(operation);
+      return;
+    }
     if (!this.outstanding) {
       this.sendOperation(operation);
       this.outstanding = operation;

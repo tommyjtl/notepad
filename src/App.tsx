@@ -7,14 +7,15 @@ import useLocalStorageState from "use-local-storage-state";
 
 import Footer from "./Footer";
 import Sidebar from "./Sidebar";
+import type { ConnectionState } from "./ConnectionStatus";
 import animals from "./animals.json";
 import languages from "./languages.json";
 import Rustpad, { UserInfo } from "./rustpad";
 import useHash from "./useHash";
 
 function getWsUri(id: string) {
-  let url = new URL(`api/socket/${id}`, window.location.href);
-  url.protocol = url.protocol == "https:" ? "wss:" : "ws:";
+  const url = new URL(`/api/socket/${id}`, window.location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.href;
 }
 
@@ -29,9 +30,7 @@ function generateHue() {
 function App() {
   const toast = useToast();
   const [language, setLanguage] = useState("plaintext");
-  const [connection, setConnection] = useState<
-    "connected" | "disconnected" | "desynchronized"
-  >("disconnected");
+  const [connection, setConnection] = useState<ConnectionState>("loading");
   const [users, setUsers] = useState<Record<number, UserInfo>>({});
   const [name, setName] = useLocalStorageState("name", {
     defaultValue: generateName,
@@ -47,7 +46,12 @@ function App() {
   const id = useHash();
 
   useEffect(() => {
+    editor?.updateOptions({ readOnly: connection !== "connected" });
+  }, [editor, connection]);
+
+  useEffect(() => {
     if (editor?.getModel()) {
+      setConnection("connecting");
       const model = editor.getModel()!;
       model.setValue("");
       model.setEOL(0); // LF
@@ -55,7 +59,7 @@ function App() {
         uri: getWsUri(id),
         editor,
         onConnected: () => setConnection("connected"),
-        onDisconnected: () => setConnection("disconnected"),
+        onDisconnected: () => setConnection("connecting"),
         onDesynchronized: () => {
           setConnection("desynchronized");
           toast({
@@ -155,6 +159,7 @@ function App() {
               options={{
                 automaticLayout: true,
                 fontSize: 13,
+                readOnly: connection !== "connected",
               }}
               onMount={(editor) => setEditor(editor)}
             />

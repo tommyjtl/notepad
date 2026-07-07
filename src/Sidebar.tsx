@@ -11,14 +11,14 @@ import {
   Switch,
   useToast,
 } from "@chakra-ui/react";
-import ConnectionStatus from "./ConnectionStatus";
+import ConnectionStatus, { ConnectionState } from "./ConnectionStatus";
 import User from "./User";
 import languages from "./languages.json";
 import type { UserInfo } from "./rustpad";
 
 export type SidebarProps = {
   documentId: string;
-  connection: "connected" | "disconnected" | "desynchronized";
+  connection: ConnectionState;
   darkMode: boolean;
   language: string;
   currentUser: UserInfo;
